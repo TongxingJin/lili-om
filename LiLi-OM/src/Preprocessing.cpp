@@ -132,7 +132,7 @@ public:
         gyr_0 = angular_velocity;
     }
 
-    void processIMU(double t_cur) {
+    void processIMU(double t_cur) {// integrate imus from last lidar time to t_cur 
         double rx = 0, ry = 0, rz = 0;
         int i = idx_imu;
         if(i >= imu_buf.size())
@@ -142,13 +142,13 @@ public:
             double t = imu_buf[i]->header.stamp.toSec();
             if (current_time_imu < 0)
                 current_time_imu = t;
-            double dt = t - current_time_imu;
+            double dt = t - current_time_imu;// Interval between this and last imu (or last lidar time if this is the first within consecutive key frames)
             current_time_imu = imu_buf[i]->header.stamp.toSec();
 
             rx = imu_buf[i]->angular_velocity.x;
             ry = imu_buf[i]->angular_velocity.y;
             rz = imu_buf[i]->angular_velocity.z;
-            solveRotation(dt, Eigen::Vector3d(rx, ry, rz));
+            solveRotation(dt, Eigen::Vector3d(rx, ry, rz));// Median filter and accumulate into q_iMU
             i++;
             if(i >= imu_buf.size())
                 break;
@@ -187,18 +187,18 @@ public:
             ry = imu_in->angular_velocity.y;
             rz = imu_in->angular_velocity.z;
             Eigen::Vector3d angular_velocity(rx, ry, rz);
-            gyr_0 = angular_velocity;
+            gyr_0 = angular_velocity;// For median filter
         }
     }
 
-    void cloudHandler( const sensor_msgs::PointCloud2ConstPtr &lidar_cloud_msg) {
+    void cloudHandler( const sensor_msgs::PointCloud2ConstPtr &lidar_cloud_msg) {// first use curvature to select convex points, and then do eigen solve to determine corners or surfs 
         // cache point cloud
         cloud_queue.push_back(*lidar_cloud_msg);
         if (cloud_queue.size() <= 2)
             return;
         else
         {
-            current_cloud_msg = cloud_queue.front();
+            current_cloud_msg = cloud_queue.front();// use as target?
             cloud_queue.pop_front();
 
             cloud_header = current_cloud_msg.header;
@@ -209,7 +209,7 @@ public:
         int tmp_idx = 0;
         if(idx_imu > 0)
             tmp_idx = idx_imu - 1;
-        if (imu_buf.empty() || imu_buf[tmp_idx]->header.stamp.toSec() > time_scan_next)
+        if (imu_buf.empty() || imu_buf[tmp_idx]->header.stamp.toSec() > time_scan_next) // If theres is no imu msgs before this frame of lidar, skip.
         {
             ROS_WARN("Waiting for IMU data ...");
             return;
@@ -236,7 +236,7 @@ public:
         PointXYZINormal point;
         PointXYZINormal point_undis;
         PointXYZINormal mat[N_SCANS][H_SCANS];
-        double t_interval = 0.1 / (H_SCANS-1);
+        double t_interval = 0.1 / (H_SCANS-1);// H_SCANS is colun numbers
         pcl::PointCloud<PointXYZINormal>::Ptr surf_features(new pcl::PointCloud<PointXYZINormal>());
         pcl::PointCloud<PointXYZINormal>::Ptr edge_features(new pcl::PointCloud<PointXYZINormal>());
 
@@ -253,7 +253,7 @@ public:
             if(scan_id < 0)
                 continue;
 
-            point_undis = undistortion(point, q_iMU);
+            point_undis = undistortion(point, q_iMU);// undistortion bu rotation
             lidar_cloud_cutted.push_back(point_undis);
 
             double dep = point_undis.x*point_undis.x + point_undis.y*point_undis.y + point_undis.z*point_undis.z;
@@ -262,12 +262,12 @@ public:
             int col = int(round((point_undis.intensity - scan_id) / t_interval));
             if (col >= H_SCANS || col < 0)
                 continue;
-            if (mat[scan_id][col].curvature != 0)
+            if (mat[scan_id][col].curvature != 0)// Already exists
                 continue;
             mat[scan_id][col] = point_undis;
         }
 
-        for(int i = 5; i < H_SCANS - 12; i = i + 6) {
+        for(int i = 5; i < H_SCANS - 12; i = i + 6) { // group 6 cols into a pattern
             vector<Eigen::Vector3d> near_pts;
             Eigen::Vector3d center(0, 0, 0);
             int num = 36;
@@ -310,11 +310,11 @@ public:
                     double g1 = getDepth(mat[k][i+j-4]) + getDepth(mat[k][i+j-3]) +
                             getDepth(mat[k][i+j-2]) + getDepth(mat[k][i+j-1]) - 8*getDepth(mat[k][i+j]) +
                             getDepth(mat[k][i+j+1]) + getDepth(mat[k][i+j+2]) + getDepth(mat[k][i+j+3]) +
-                            getDepth(mat[k][i+j+4]);
+                            getDepth(mat[k][i+j+4]);// what if the element is empty? treat as 0?
 
                     g1 = g1 / (8 * getDepth(mat[k][i+j]) + 1e-3);
 
-                    if(g1 > 0.06) {
+                    if(g1 > 0.06) { // only keep the most convex point per line of a pattern at maximum to do eigen solve, why??? Will not filter out pure planes?
                         if(g1 > max_s) {
                             max_s = g1;
                             idx = i+j;
@@ -355,12 +355,12 @@ public:
                 for(int j = 0; j < idsx_edge.size(); j++) {
                     if(mat[idsx_edge[j]][idsy_edge[j]].curvature <= 0 && mat[idsx_edge[j]][idsy_edge[j]].intensity <= 0)
                         continue;
-                    mat[idsx_edge[j]][idsy_edge[j]].normal_x = unitDirection.x();
+                    mat[idsx_edge[j]][idsy_edge[j]].normal_x = unitDirection.x();// add normal in points matrix
                     mat[idsx_edge[j]][idsy_edge[j]].normal_y = unitDirection.y();
                     mat[idsx_edge[j]][idsy_edge[j]].normal_z = unitDirection.z();
 
-                    edge_features->points.push_back(mat[idsx_edge[j]][idsy_edge[j]]);
-                    mat[idsx_edge[j]][idsy_edge[j]].curvature *= -1;
+                    edge_features->points.push_back(mat[idsx_edge[j]][idsy_edge[j]]);// add features into a cloud 
+                    mat[idsx_edge[j]][idsy_edge[j]].curvature *= -1;// prevent duplication
                 }
             }
 
@@ -395,12 +395,12 @@ public:
         pub_edge.publish(edge_features_msg);
 
         sensor_msgs::PointCloud2 cloud_cutted_msg;
-        pcl::toROSMsg(lidar_cloud_cutted, cloud_cutted_msg);
+        pcl::toROSMsg(lidar_cloud_cutted, cloud_cutted_msg);// undistorted original cloud
         cloud_cutted_msg.header.stamp = cloud_header.stamp;
         cloud_cutted_msg.header.frame_id = frame_id;
         pub_cutted_cloud.publish(cloud_cutted_msg);
 
-        q_iMU = Eigen::Quaterniond::Identity();
+        q_iMU = Eigen::Quaterniond::Identity();// reset
         //t_pre.tic_toc();
         runtime += t_pre.toc();
         //cout<<"pre_num: "<<++pre_num<<endl;
