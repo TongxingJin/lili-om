@@ -280,7 +280,7 @@ public:
     void buildLocalMap() {
         surf_from_map->clear();
         // Initialization
-        if (pose_cloud_frame->points.size() <= 1) {
+        if (pose_cloud_frame->points.size() <= 1) {// just initialized and this is the second frame
             // ROS_INFO("Initialization for odometry local map");
             *surf_from_map += *surf_features;
             return;
@@ -309,7 +309,7 @@ public:
         surf_features->clear();
         full_cloud->clear();
         if(surf_frames.size() > 7)
-            surf_frames[surf_frames.size() - 8]->clear();
+            surf_frames[surf_frames.size() - 8]->clear();// keep last 7 frames of features
     }
 
     void downSampleCloud() {
@@ -338,7 +338,7 @@ public:
         tmpPoseInfo.qx = abs_pose[1];
         tmpPoseInfo.qy = abs_pose[2];
         tmpPoseInfo.qz = abs_pose[3];
-        tmpPoseInfo.idx = pose_cloud_frame->points.size();
+        tmpPoseInfo.idx = pose_cloud_frame->points.size();// correct?
         tmpPoseInfo.time = time_new_surf;
         pose_info_cloud_frame->push_back(tmpPoseInfo);
 
@@ -510,7 +510,7 @@ public:
             problem.AddParameterBlock(transformInc, 4, quatParameterization);
             problem.AddParameterBlock(transformInc + 4, 3);
 
-            findCorrespondingSurfFeatures();
+            findCorrespondingSurfFeatures();// Just use surf points? Where is intensity as residual weight?
 
             for (int i = 0; i < surf_res_cnt; ++i) {
                 Eigen::Vector3d currentPt(surf_current_pts->points[i].x,
@@ -528,7 +528,7 @@ public:
             ceres::Solver::Options solverOptions;
             solverOptions.linear_solver_type = ceres::DENSE_QR;
             solverOptions.max_num_iterations = max_num_iter;
-            solverOptions.max_solver_time_in_seconds = 0.015;
+            solverOptions.max_solver_time_in_seconds = 0.015;// TODO:
             solverOptions.minimizer_progress_to_stdout = false;
             solverOptions.check_gradients = false;
             solverOptions.gradient_check_relative_precision = 1e-2;
@@ -653,31 +653,31 @@ public:
         if (new_surf && new_full_cloud && new_edge
                 && abs(time_new_full_points - time_new_surf) < 0.1
                 && abs(time_new_full_points - time_new_edge) < 0.1) {
-            new_surf = false;
+            new_surf = false;// thread safe
             new_edge = false;
             new_full_cloud = false;
         } else
             return;
 
         if (!system_initialized) {
-            savePoses();
+            savePoses();// empty cloud for first frame?
             checkInitialization();
             return;
         }
 
-        poseInitialization();
+        poseInitialization();// const velocity prediction
         Timer t_odm("LidarOdometry");
-        buildLocalMap();
+        buildLocalMap();// the history 20 frames
         downSampleCloud();
-        updateTransformationWithCeres();
-        savePoses();
-        computeRelative();
-        if(kf) {
-            kf_num = pose_cloud_frame->points.size();
+        updateTransformationWithCeres();// use only surf points to do scan2map matching odometry
+        savePoses();// Both regular and key frames
+        computeRelative();// for prediction
+        if(kf) { // only key frames are published and processed by backend
+            kf_num = pose_cloud_frame->points.size();// the number of all frames!
             publishOdometry();
-            publishCloudLast();
+            publishCloudLast();// do translation distortion and publish features based on current odometry pose
         }
-        publishEachOdometry();
+        publishEachOdometry();// publish relative pose
         clearCloud();
         // cout<<"odom_pub_cnt: "<<++odom_pub_cnt<<endl;
         //t_odm.tic_toc();
