@@ -238,7 +238,7 @@ public:
     {
         initializeParameters();
         allocateMemory();
-
+        // Published by odometry at key frame rate, just cached here
         sub_full_cloud = nh.subscribe<sensor_msgs::PointCloud2>("/full_point_cloud", 100, &BackendFusion::full_cloudHandler, this);
         sub_edge = nh.subscribe<sensor_msgs::PointCloud2>("/laser_cloud_corner_last", 100, &BackendFusion::edge_lastHandler, this);
         sub_surf = nh.subscribe<sensor_msgs::PointCloud2>("/laser_cloud_surf_last", 100, &BackendFusion::surfaceLastHandler, this);
@@ -616,7 +616,7 @@ public:
         each_odom_buf.push_back(odomIn);
 
         if(each_odom_buf.size() > 50)
-            each_odom_buf[each_odom_buf.size() - 51] = nullptr;
+            each_odom_buf[each_odom_buf.size() - 51] = nullptr;// Reset old shared ptr and release the memory
 
         new_each_odom = true;
     }
@@ -812,7 +812,7 @@ public:
             Vs.push_back(Vs.back());
         }
 
-        Eigen::Vector3d un_acc_0 = Rs.back() * (acc_0 - Bas.back()) - g;
+        Eigen::Vector3d un_acc_0 = Rs.back() * (acc_0 - Bas.back()) - g;// for medium filter, but no need to minus g here 
         Eigen::Vector3d un_gyr = 0.5 * (gyr_0 + angular_velocity) - Bgs.back();
         Rs.back() *= deltaQ(un_gyr * dt).toRotationMatrix();
         Eigen::Vector3d un_acc_1 = Rs.back() * (linear_acceleration - Bas.back()) - g;
@@ -1422,7 +1422,7 @@ public:
                                      pose_info_cloud_frame->points[idx].y,
                                      pose_info_cloud_frame->points[idx].z);
 
-                Eigen::Quaterniond q_tmp = q_po * q_bl;
+                Eigen::Quaterniond q_tmp = q_po * q_bl;// imu pose -> lidar pose?
                 Eigen::Vector3d t_tmp = q_po * t_bl + t_po;
 
                 PointPoseInfo Ttmp;
@@ -1682,8 +1682,8 @@ public:
 
     void saveKeyFramesAndFactors()
     {
-        abs_poses.push_back(abs_pose);
-        keyframe_id_in_frame.push_back(each_odom_buf.size()-1);
+        abs_poses.push_back(abs_pose);// add new initial pose???
+        keyframe_id_in_frame.push_back(each_odom_buf.size()-1);// the latest relative transform
 
         pcl::PointCloud<PointType>::Ptr cornerEachFrame(new pcl::PointCloud<PointType>());
         pcl::PointCloud<PointType>::Ptr surfEachFrame(new pcl::PointCloud<PointType>());
@@ -1699,7 +1699,7 @@ public:
 
         double dx = 0, dy = 0, dz = 0, rx = 0, ry = 0, rz = 0;
 
-        int i = idx_imu;
+        int i = idx_imu;// the first imu larger than last odo time
         Eigen::Quaterniond tmpOrient;
         double timeodom_cur = odom_cur->header.stamp.toSec();
         if(imu_buf[i]->header.stamp.toSec() > timeodom_cur)
@@ -1709,7 +1709,7 @@ public:
             double t = imu_buf[i]->header.stamp.toSec();
             if (cur_time_imu < 0)
                 cur_time_imu = t;
-            double dt = t - cur_time_imu;
+            double dt = t - cur_time_imu;// cur_time_imu is also last odo time
             cur_time_imu = imu_buf[i]->header.stamp.toSec();
             dx = imu_buf[i]->linear_acceleration.x;
             dy = imu_buf[i]->linear_acceleration.y;
@@ -1736,7 +1736,7 @@ public:
                 break;
         }
 
-        imu_idx_in_kf.push_back(i - 1);
+        imu_idx_in_kf.push_back(i - 1);// the last imu before current key odo time
 
         if(i < imu_buf.size()) {
             double dt1 = timeodom_cur - cur_time_imu;
@@ -1768,8 +1768,8 @@ public:
             rz = w1 * rz + w2 * imu_buf[i]->angular_velocity.z;
             processIMU(dt1, Eigen::Vector3d(dx, dy, dz), Eigen::Vector3d(rx, ry, rz));
         }
-        cur_time_imu = timeodom_cur;
-
+        cur_time_imu = timeodom_cur;// set for next
+        // <- imu preintegration 
 
         vector<double> tmpSpeedBias;
         tmpSpeedBias.push_back(Vs.back().x());
@@ -2724,7 +2724,7 @@ public:
 
     void run()
     {
-        if (new_surf && new_edge && new_odom && new_each_odom && new_full_cloud)
+        if (new_surf && new_edge && new_odom && new_each_odom && new_full_cloud)// safe?
         {
             new_edge = false;
             new_surf = false;
@@ -2737,7 +2737,7 @@ public:
             //cout<<"map_pub_cnt: "<<++map_pub_cnt<<endl;
 
             Timer t_map("BackendFusion");
-            buildLocalMapWithLandMark();
+            buildLocalMapWithLandMark();// the latest several pcs 
             downSampleCloud();
             saveKeyFramesAndFactors();
             publishOdometry();
