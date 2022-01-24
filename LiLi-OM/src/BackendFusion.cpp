@@ -807,7 +807,7 @@ public:
             pre_integrations.back()->g_vec_ = -g;
             Bas.push_back(Bas.back());
             Bgs.push_back(Bgs.back());
-            Rs.push_back(Rs.back());
+            Rs.push_back(Rs.back());// imu odometry?
             Ps.push_back(Ps.back());
             Vs.push_back(Vs.back());
         }
@@ -902,7 +902,7 @@ public:
                 }
 
             }
-
+            // imu integration between the regular frames  
             for (int idx = keyframe_idx[keyframe_idx.size()-slide_window_width]; idx < keyframe_idx.back(); ++idx) {
                 //add imu factor
                 ImuFactor *imuFactor = new ImuFactor(pre_integrations[idx+1]);
@@ -926,7 +926,7 @@ public:
                         tmpTrans[idx-keyframe_idx[keyframe_idx.size()-slide_window_width]][1],
                         tmpTrans[idx-keyframe_idx[keyframe_idx.size()-slide_window_width]][2]);
 
-                Q2 = Q2 * q_lb.inverse();
+                Q2 = Q2 * q_lb.inverse();// from imu odometry to infer lidar pose
                 T2 = T2 - Q2 * t_lb;
 
                 int idVec = idx - keyframe_idx[keyframe_idx.size()-slide_window_width];
