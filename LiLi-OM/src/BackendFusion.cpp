@@ -802,7 +802,7 @@ public:
     {
         //      if(pre_integrations.size() == 0)
         //          pre_integrations.push_back(new IntegrationBase(acc_0, gyr_0, Bas[0], Bgs[0]));
-        if(pre_integrations.size() < abs_poses.size()) {
+        if(pre_integrations.size() < abs_poses.size()) { // a new ky frame is added
             pre_integrations.push_back(new Preintegration(acc_0, gyr_0, Bas.back(), Bgs.back()));
             pre_integrations.back()->g_vec_ = -g;
             Bas.push_back(Bas.back());
@@ -811,8 +811,8 @@ public:
             Ps.push_back(Ps.back());
             Vs.push_back(Vs.back());
         }
-
-        Eigen::Vector3d un_acc_0 = Rs.back() * (acc_0 - Bas.back()) - g;// for medium filter, but no need to minus g here 
+        // the following Rs,Ps,Vs are global poses
+        Eigen::Vector3d un_acc_0 = Rs.back() * (acc_0 - Bas.back()) - g;
         Eigen::Vector3d un_gyr = 0.5 * (gyr_0 + angular_velocity) - Bgs.back();
         Rs.back() *= deltaQ(un_gyr * dt).toRotationMatrix();
         Eigen::Vector3d un_acc_1 = Rs.back() * (linear_acceleration - Bas.back()) - g;
@@ -820,7 +820,7 @@ public:
         Ps.back() += dt * Vs.back() + 0.5 * dt * dt * un_acc;
         Vs.back() += dt * un_acc;
 
-        pre_integrations.back()->push_back(dt, linear_acceleration, angular_velocity);
+        pre_integrations.back()->push_back(dt, linear_acceleration, angular_velocity);// imu preintegration
 
         acc_0 = linear_acceleration;
         gyr_0 = angular_velocity;
@@ -1772,7 +1772,7 @@ public:
         // <- imu preintegration 
 
         vector<double> tmpSpeedBias;
-        tmpSpeedBias.push_back(Vs.back().x());
+        tmpSpeedBias.push_back(Vs.back().x());// global pose of current key frame
         tmpSpeedBias.push_back(Vs.back().y());
         tmpSpeedBias.push_back(Vs.back().z());
         tmpSpeedBias.push_back(Bas.back().x());
@@ -1782,7 +1782,7 @@ public:
         tmpSpeedBias.push_back(Bgs.back().y());
         tmpSpeedBias.push_back(Bgs.back().z());
         para_speed_bias.push_back(tmpSpeedBias);
-        idx_imu = i;
+        idx_imu = i;// the first imu larger than next key frame time
 
         PointXYZI latestPose;
         PointPoseInfo latestPoseInfo;
