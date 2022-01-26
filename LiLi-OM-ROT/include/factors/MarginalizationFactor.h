@@ -43,6 +43,7 @@ public:
 
     std::vector<ResidualBlockInfo *> factors;
     int m, n;
+    // long一般是地址，用来作为parameter_block的标识
     std::unordered_map<long, int> parameter_block_size; //global size
     int sum_block_size;
     std::unordered_map<long, int> parameter_block_idx; //local size

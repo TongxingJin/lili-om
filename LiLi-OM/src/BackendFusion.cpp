@@ -846,9 +846,10 @@ public:
             ceres::LocalParameterization *quatParameterization = new ceres::QuaternionParameterization();
             ceres::Problem problem;
 
+            // 窗口内关键帧对应的q, p, v, bias保存到数组，作为被ceres优化的变量，注意这里是imu的位姿
             //eigen to double
             for (int i = keyframe_idx[keyframe_idx.size()-slide_window_width]; i <= keyframe_idx.back(); i++){
-
+                
                 Eigen::Quaterniond tmpQ(Rs[i]);
                 tmpQuat[i-keyframe_idx[keyframe_idx.size()-slide_window_width]][0] = tmpQ.w();
                 tmpQuat[i-keyframe_idx[keyframe_idx.size()-slide_window_width]][1] = tmpQ.x();
@@ -858,7 +859,7 @@ public:
                 tmpTrans[i-keyframe_idx[keyframe_idx.size()-slide_window_width]][1] = Ps[i][1];
                 tmpTrans[i-keyframe_idx[keyframe_idx.size()-slide_window_width]][2] = Ps[i][2];
 
-                abs_poses[i][0] = tmpQ.w();
+                abs_poses[i][0] = tmpQ.w();// keyframe_idx[], i是当前关键帧在abs_pose中的索引
                 abs_poses[i][1] = tmpQ.x();
                 abs_poses[i][2] = tmpQ.y();
                 abs_poses[i][3] = tmpQ.z();
@@ -881,14 +882,14 @@ public:
             abs_pose = abs_poses.back();
 
             if(true) {
-                if (last_marginalization_info) {
+                if (last_marginalization_info) { // 如果上次优化产生边缘约束
                     // construct new marginlization_factor
                     MarginalizationFactor *marginalization_factor = new MarginalizationFactor(last_marginalization_info);
                     problem.AddResidualBlock(marginalization_factor, NULL,
                                              last_marginalization_parameter_blocks);
                 }
             }
-
+            // 发生回环
             if(!marg) {
                 //add prior factor
                 for(int i = 0; i < slide_window_width - 1; i++) {
@@ -902,7 +903,7 @@ public:
                 }
 
             }
-            // imu integration between the regular frames  
+            // 滑窗内相邻关键帧之间的IMU预积分约束
             for (int idx = keyframe_idx[keyframe_idx.size()-slide_window_width]; idx < keyframe_idx.back(); ++idx) {
                 //add imu factor
                 ImuFactor *imuFactor = new ImuFactor(pre_integrations[idx+1]);
@@ -915,7 +916,7 @@ public:
 
 
             }
-
+            // 滑窗内关键帧与map之间存在的约束
             for (int idx = keyframe_idx[keyframe_idx.size()-slide_window_width]; idx <= keyframe_idx.back(); idx++)
             {
                 Eigen::Quaterniond Q2 = Eigen::Quaterniond(tmpQuat[idx-keyframe_idx[keyframe_idx.size()-slide_window_width]][0],
@@ -926,7 +927,7 @@ public:
                         tmpTrans[idx-keyframe_idx[keyframe_idx.size()-slide_window_width]][1],
                         tmpTrans[idx-keyframe_idx[keyframe_idx.size()-slide_window_width]][2]);
 
-                Q2 = Q2 * q_lb.inverse();// from imu odometry to infer lidar pose
+                Q2 = Q2 * q_lb.inverse();// 基于被优化出来的最新的imu位姿，计算此时lidar位置
                 T2 = T2 - Q2 * t_lb;
 
                 int idVec = idx - keyframe_idx[keyframe_idx.size()-slide_window_width];
@@ -1004,17 +1005,18 @@ public:
                     tmpQuat[i][3] = tmp.z();
                 }
             }
-        }
+        }// 窗口内优化结束
 
+        // 以下，为margin相关
         MarginalizationInfo *marginalization_info = new MarginalizationInfo();
-
+        // 如果margin过
         if (last_marginalization_info) {
             vector<int> drop_set;
             for (int i = 0; i < static_cast<int>(last_marginalization_parameter_blocks.size()); i++) {
                 if (last_marginalization_parameter_blocks[i] == tmpTrans[0] ||
                         last_marginalization_parameter_blocks[i] == tmpQuat[0] ||
                         last_marginalization_parameter_blocks[i] == tmpSpeedBias[0])
-                    drop_set.push_back(i);
+                    drop_set.push_back(i);// 以前的marginal信息包含了本次将要被marginal的位姿
             }
             // construct new marginlization_factor
 
@@ -1024,10 +1026,10 @@ public:
                                                                            last_marginalization_parameter_blocks,
                                                                            drop_set);
 
-            marginalization_info->AddResidualBlockInfo(residual_block_info);
+            marginalization_info->AddResidualBlockInfo(residual_block_info);// 增加上一次的margin信息到当前margin
         }
 
-
+        // 形成闭环
         if(!marg) {
             //add prior factor
             for(int i = 0; i < slide_window_width - 1; i++) {
@@ -1065,7 +1067,7 @@ public:
             marg = true;
         }
 
-
+        // 滑窗内第1和2帧之间的imu预积分约束，需要被margin掉
         //imu
         ImuFactor *imuFactor = new ImuFactor(pre_integrations[keyframe_idx[keyframe_idx.size()-slide_window_width]+1]);
 
@@ -1082,7 +1084,7 @@ public:
 
         marginalization_info->AddResidualBlockInfo(residual_block_info);
 
-
+        // 主要针对需要被margin掉的帧
         //lidar
         for (int idx = keyframe_idx[keyframe_idx.size()-slide_window_width]; idx <= keyframe_idx.back(); idx++)
         {
@@ -1107,14 +1109,14 @@ public:
                     ceres::CostFunction *costFunction = LidarPlaneNormFactor::Create(currentPt, norm, q_lb, t_lb, normInverse, vec_surf_scores[idVec][i]);
 
                     vector<int> drop_set;
-                    if(idx == keyframe_idx[keyframe_idx.size()-slide_window_width]) {
+                    if(idx == keyframe_idx[keyframe_idx.size()-slide_window_width]) {// 如果是第一帧，即需要被margin掉的那帧
                         drop_set.push_back(0);
                         drop_set.push_back(1);
                     }
                     ResidualBlockInfo *residual_block_info = new ResidualBlockInfo(costFunction, lossFunction,
                                                                                    tmp,
                                                                                    drop_set);
-                    marginalization_info->AddResidualBlockInfo(residual_block_info);
+                    marginalization_info->AddResidualBlockInfo(residual_block_info);// 如果是需要被margin掉的帧，其对应的paramers的parameter_block_idx会被置为0
                 }
 
 
@@ -1163,27 +1165,27 @@ public:
             vec_surf_res_cnt[idVec] = 0;
             vec_surf_scores[idVec].clear();
         }
-
+        // TODO:真正执行边缘化
         marginalization_info->PreMarginalize();
-        marginalization_info->Marginalize();
-
+        marginalization_info->Marginalize();// <=边缘化结束
+        
         std::unordered_map<long, double *> addr_shift;
         for (int i = 1; i < windowSize; ++i) {
-            addr_shift[reinterpret_cast<long>(tmpTrans[i])] = tmpTrans[i-1];
+            addr_shift[reinterpret_cast<long>(tmpTrans[i])] = tmpTrans[i-1];// key为当前的地址，value为将要被覆盖的地址
             addr_shift[reinterpret_cast<long>(tmpQuat[i])] = tmpQuat[i-1];
             addr_shift[reinterpret_cast<long>(tmpSpeedBias[i])] = tmpSpeedBias[i-1];
         }
 
-        vector<double *> parameter_blocks = marginalization_info->GetParameterBlocks(addr_shift);
+        vector<double *> parameter_blocks = marginalization_info->GetParameterBlocks(addr_shift);// 被保留的参数的新地址
 
 
         if (last_marginalization_info) {
             delete last_marginalization_info;
         }
         last_marginalization_info = marginalization_info;
-        last_marginalization_parameter_blocks = parameter_blocks;
+        last_marginalization_parameter_blocks = parameter_blocks;// TODO:在哪里完成了真正的shift？
 
-
+        // 保存ceres优化的结果
         //double to eigen
         for (int i = keyframe_idx[keyframe_idx.size()-slide_window_width]; i <= keyframe_idx.back(); ++i){
 
@@ -1600,7 +1602,7 @@ public:
 
     void findCorrespondingSurfFeatures(int idx, Eigen::Quaterniond q, Eigen::Vector3d t)
     {
-        int idVec = idx - keyframe_idx[keyframe_idx.size()-slide_window_width] + 1;
+        int idVec = idx - keyframe_idx[keyframe_idx.size()-slide_window_width] + 1;// id of the regular frame in the window?
         vec_surf_res_cnt[idVec] = 0;
 
         for (int i = 0; i < surf_lasts_ds[idx]->points.size(); ++i)

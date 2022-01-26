@@ -93,13 +93,13 @@ void MarginalizationInfo::AddResidualBlockInfo(ResidualBlockInfo *residual_block
     for (int i = 0; i < static_cast<int>(residual_block_info->parameter_blocks.size()); i++) {
         double *addr = parameter_blocks[i];
         int size = parameter_block_sizes[i];
-        parameter_block_size[reinterpret_cast<long>(addr)] = size;
+        parameter_block_size[reinterpret_cast<long>(addr)] = size;// 成员变量
     }
 
-    if(residual_block_info->drop_set.size() == 0) return;
+    if(residual_block_info->drop_set.size() == 0) return;// 如果drop_set为空，在这里就返回了
 
     for (int i = 0; i < static_cast<int>(residual_block_info->drop_set.size()); i++) {
-        double *addr = parameter_blocks[residual_block_info->drop_set[i]];
+        double *addr = parameter_blocks[residual_block_info->drop_set[i]];// 该parameter block的首地址
         parameter_block_idx[reinterpret_cast<long>(addr)] = 0;
     }
 }
@@ -208,11 +208,11 @@ std::vector<double *> MarginalizationInfo::GetParameterBlocks(std::unordered_map
     keep_block_data.clear();
 
     for (const auto &it : parameter_block_idx) {
-        if (it.second >= m) {
+        if (it.second >= m) {// 该paramter的parameter_block_idx没有置零，需要被保留
             keep_block_size.push_back(parameter_block_size[it.first]);
             keep_block_idx.push_back(parameter_block_idx[it.first]);
             keep_block_data.push_back(parameter_block_data[it.first]);
-            keep_block_addr.push_back(addr_shift[it.first]);
+            keep_block_addr.push_back(addr_shift[it.first]);// value为将要去覆盖的地址
         }
     }
     sum_block_size = std::accumulate(std::begin(keep_block_size), std::end(keep_block_size), 0);
