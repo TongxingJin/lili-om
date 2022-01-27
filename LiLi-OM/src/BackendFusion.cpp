@@ -1684,6 +1684,10 @@ public:
         }
     }
 
+    // 1.窗口内关键帧优化并margin
+    // 2.被margin出去的关键帧与更前关键帧之间的普通帧，位姿优化
+    // 3.被margin出去的关键帧与前面的普通帧被增加到全局位姿图中，全局优化
+    // 也就是说在,当某一帧成为了slide_window_width中最旧的一帧并被margin掉后，其前序普通帧才会通过local graph优化，继而连同该margin关键帧被添加到global graph中做优化
     void saveKeyFramesAndFactors()
     {
         abs_poses.push_back(abs_pose);// add new initial pose???
@@ -1838,7 +1842,7 @@ public:
 
             for (int i = 0; i < 7; ++i)
             {
-                last_pose[i] = abs_poses[abs_poses.size()-slide_window_width][i];
+                last_pose[i] = abs_poses[abs_poses.size()-slide_window_width][i];// TODO:abs_poses到底起到什么作用？在哪里赋值的？
             }
             select_pose.x = last_pose[4];
             select_pose.y = last_pose[5];
@@ -1848,7 +1852,7 @@ public:
         else if(pose_cloud_frame->points.size() > slide_window_width)
         {
             for(int i = keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width - 1] + 1;
-                i <= keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width]; i++) {
+                i <= keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width]; i++) {// margin掉的关键帧，及之前的普通帧，两两之间存在双边约束
                 gtsam::Rot3 rotationLast = gtsam::Rot3::Quaternion(pose_info_each_frame->points[i-1].qw,
                         pose_info_each_frame->points[i-1].qx,
                         pose_info_each_frame->points[i-1].qy,
