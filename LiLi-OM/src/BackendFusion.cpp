@@ -1285,7 +1285,7 @@ public:
                 ROS_WARN("bad bg3!!!!!!!!!!");
         }
 
-        updatePose();
+        updatePose();// 从ceres优化参数数组中更新到保存位姿的poin cloud中
     }
 
 
@@ -1293,7 +1293,7 @@ public:
     {
         abs_pose = abs_poses.back();
         for (int i = keyframe_idx[keyframe_idx.size()-slide_window_width]; i <= keyframe_idx[keyframe_idx.size()-1]; ++i){
-            pose_cloud_frame->points[i-1].x = abs_poses[i][4];
+            pose_cloud_frame->points[i-1].x = abs_poses[i][4];// 这里说明abs_poses与位姿点云中同一关键帧差了1个位置
             pose_cloud_frame->points[i-1].y = abs_poses[i][5];
             pose_cloud_frame->points[i-1].z = abs_poses[i][6];
 
@@ -1307,17 +1307,17 @@ public:
         }
     }
 
-
+    // paraEach相当于n+1个约束，对n组位姿进行优化，两侧的关键帧为参数
     void optimizeLocalGraph(vector<double*> paraEach) {
         ceres::LocalParameterization *quatParameterization = new ceres::QuaternionParameterization();
         ceres::Problem problem;
-
+        // 两个关键帧之间普通帧的数量
         int numPara = keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width] - keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width - 1]-1;
-        double dQuat[numPara][4];
+        double dQuat[numPara][4];// 用来保存所有普通帧的位姿，用来被ceres优化
         double dTrans[numPara][3];
 
         for(int i = keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width - 1] + 1;
-            i < keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width]; i++) {
+            i < keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width]; i++) {// 对于所有普通帧
             dTrans[i-keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width - 1]-1][0] = pose_each_frame->points[i].x;
             dTrans[i-keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width - 1]-1][1] = pose_each_frame->points[i].y;
             dTrans[i-keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width - 1]-1][2] = pose_each_frame->points[i].z;
@@ -1332,7 +1332,8 @@ public:
         }
 
 
-
+        // 第一普通帧与前关键帧间的约束，只对第一普通帧进行优化
+        // 前关键帧不参与优化，相当于参数，IMU的积分delta相当于观测，对第一普通帧进行优化
         ceres::CostFunction *LeftFactor = LidarPoseLeftFactorAutoDiff::Create(Eigen::Quaterniond(paraEach[1][0], paraEach[1][1], paraEach[1][2], paraEach[1][3]),
                 Eigen::Vector3d(paraEach[0][0], paraEach[0][1], paraEach[0][2]),
                 Eigen::Quaterniond(pose_info_cloud_frame->points[pose_cloud_frame->points.size() - slide_window_width - 1].qw,
@@ -1343,13 +1344,14 @@ public:
                 pose_info_cloud_frame->points[pose_cloud_frame->points.size() - slide_window_width - 1].y,
                 pose_info_cloud_frame->points[pose_cloud_frame->points.size() - slide_window_width - 1].z));
         problem.AddResidualBlock(LeftFactor, NULL, dTrans[0], dQuat[0]);
+        // 普通帧间约束，约束相邻两个普通帧
         for(int i = 0; i < numPara - 1; i++) {
             ceres::CostFunction *Factor = LidarPoseFactorAutoDiff::Create(Eigen::Quaterniond(paraEach[2*i+1][0], paraEach[2*i+1][1], paraEach[2*i+1][2], paraEach[2*i+1][3]),
                     Eigen::Vector3d(paraEach[2*i][0], paraEach[2*i][1], paraEach[2*i][2]));
             problem.AddResidualBlock(Factor, NULL, dTrans[i], dQuat[i], dTrans[i+1], dQuat[i+1]);
 
         }
-
+        // 最后普通帧与后关键帧间的约束
         ceres::CostFunction *RightFactor = LidarPoseRightFactorAutoDiff::Create(Eigen::Quaterniond(paraEach.back()[0], paraEach.back()[1], paraEach.back()[2], paraEach.back()[3]),
                 Eigen::Vector3d(paraEach[paraEach.size()-2][0], paraEach[paraEach.size()-2][1], paraEach[paraEach.size()-2][2]),
                 Eigen::Quaterniond(pose_info_cloud_frame->points[pose_cloud_frame->points.size() - slide_window_width].qw,
@@ -1738,7 +1740,7 @@ public:
                 break;
         }
 
-        imu_idx_in_kf.push_back(i - 1);// the last imu before current key odo time
+        imu_idx_in_kf.push_back(i - 1);// 最后一个小于当前帧的imu的索引
 
         if(i < imu_buf.size()) {
             double dt1 = timeodom_cur - cur_time_imu;
@@ -1809,18 +1811,18 @@ public:
 
         //optimize sliding window
         num_kf_sliding++;
-        if(num_kf_sliding >= 1 || !first_opt) {
-            optimizeSlidingWindowWithLandMark();
+        if(num_kf_sliding >= 1 || !first_opt) { // 这里永远为true
+            optimizeSlidingWindowWithLandMark();// 局部关键帧优化和滑窗
             num_kf_sliding = 0;
         }
 
-        buildLocalPoseGraph();
+        buildLocalPoseGraph();// 滑窗出去的关键帧位姿后面不会再被滑窗优化，这里优化该关键帧与更早关键帧之间的普通帧位姿
 
         if (!loop_closure_on)
             return;
 
         //add poses to global graph
-        if (pose_cloud_frame->points.size() == slide_window_width)
+        if (pose_cloud_frame->points.size() == slide_window_width)// 第一次滑窗结束，满足该条件
         {
             gtsam::Rot3 rotation = gtsam::Rot3::Quaternion(pose_info_each_frame->points[0].qw,
                     pose_info_each_frame->points[0].qx,
@@ -1891,21 +1893,29 @@ public:
         }
     }
 
+    /* K_-1 | K_0 | K_1 | K_2
+    其中，后面3帧是滑窗内的。这里通过imu积分得到k_-1 -> k_0两个关键帧之间的所有帧的位姿
+    K_-1 k1 k2 k3 ... K_0
+    首先K_-1是已知的，然后对K_-1->k1, k1->k2, k2->k3...之间进行积分
+    对于ki->kj之间的积分，代码中比较较真，方法是：
+    imu_ii ki imu_ii+1 ... kj
+    首先插值得到ki时刻的imu，再依次中值积分，最后再对kj插值，最后进行一次中值积分
+    */
     void buildLocalPoseGraph() {
-        if (pose_cloud_frame->points.size() == slide_window_width) {
-            pose_each_frame->push_back(pose_cloud_frame->points[0]);
+        if (pose_cloud_frame->points.size() == slide_window_width) {// 第一次滑窗结束，满足该条件
+            pose_each_frame->push_back(pose_cloud_frame->points[0]);// 第一帧，也是窗口内的第一帧，被margin掉的那一帧
             pose_info_each_frame->push_back(pose_info_cloud_frame->points[0]);
         } else if(pose_cloud_frame->points.size() > slide_window_width) {
-            int ii = imu_idx_in_kf[imu_idx_in_kf.size() - slide_window_width - 1];
+            int ii = imu_idx_in_kf[imu_idx_in_kf.size() - slide_window_width - 1];// 滑窗内最旧关键帧前一帧之前的最后一个imu
             double dx = 0, dy = 0, dz = 0, rx = 0, ry = 0, rz = 0;
-            Eigen::Vector3d Ptmp = Ps[Ps.size() - slide_window_width];
+            Eigen::Vector3d Ptmp = Ps[Ps.size() - slide_window_width];// 滑窗内最旧关键帧前一帧的位姿？
             Eigen::Vector3d Vtmp = Vs[Ps.size() - slide_window_width];
             Eigen::Matrix3d Rtmp = Rs[Ps.size() - slide_window_width];
             Eigen::Vector3d Batmp = Eigen::Vector3d::Zero();
             Eigen::Vector3d Bgtmp = Eigen::Vector3d::Zero();
 
             for(int i = keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width - 1] + 1;
-                i < keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width]; i++) {
+                i < keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width]; i++) {// 窗口内最旧关键帧之前的关键帧开区间
 
                 double dt1 = each_odom_buf[i-1]->header.stamp.toSec() - imu_buf[ii]->header.stamp.toSec();
                 double dt2 = imu_buf[ii+1]->header.stamp.toSec() - each_odom_buf[i-1]->header.stamp.toSec();
@@ -1919,11 +1929,11 @@ public:
                 ry = w1 * imu_buf[ii]->angular_velocity.y + w2 * imu_buf[ii+1]->angular_velocity.y;
                 rz = w1 * imu_buf[ii]->angular_velocity.z + w2 * imu_buf[ii+1]->angular_velocity.z;
                 Eigen::Vector3d a0(dx, dy, dz);
-                Eigen::Vector3d gy0(rx, ry, rz);
+                Eigen::Vector3d gy0(rx, ry, rz);// 插值得到上一关键/普通帧的imu
                 ii++;
-                double integStartTime = each_odom_buf[i-1]->header.stamp.toSec();
+                double integStartTime = each_odom_buf[i-1]->header.stamp.toSec();// 从上一帧开始积分
 
-                while(imu_buf[ii]->header.stamp.toSec() < each_odom_buf[i]->header.stamp.toSec()) {
+                while(imu_buf[ii]->header.stamp.toSec() < each_odom_buf[i]->header.stamp.toSec()) {// ii此时是大于上一帧的第一个imu
                     double t = imu_buf[ii]->header.stamp.toSec();
                     double dt = t - integStartTime;
                     integStartTime = imu_buf[ii]->header.stamp.toSec();
@@ -1947,19 +1957,19 @@ public:
                     Eigen::Vector3d gy1(rx, ry, rz);
 
                     Eigen::Vector3d un_acc_0 = Rtmp * (a0 - Batmp) - g;
-                    Eigen::Vector3d un_gyr = 0.5 * (gy0 + gy1) - Bgtmp;
+                    Eigen::Vector3d un_gyr = 0.5 * (gy0 + gy1) - Bgtmp;// 在关键帧之间，bias不变
                     Rtmp *= deltaQ(un_gyr * dt).toRotationMatrix();
                     Eigen::Vector3d un_acc_1 = Rtmp * (a1 - Batmp) - g;
                     Eigen::Vector3d un_acc = 0.5 * (un_acc_0 + un_acc_1);
-                    Ptmp += dt * Vtmp + 0.5 * dt * dt * un_acc;
+                    Ptmp += dt * Vtmp + 0.5 * dt * dt * un_acc;// 积分
                     Vtmp += dt * un_acc;
 
                     a0 = a1;
                     gy0 = gy1;
 
                     ii++;
-                }
-
+                }// 直到大于当前帧
+                // 以下，插值当前帧的imu，并积分
                 dt1 = each_odom_buf[i]->header.stamp.toSec() - imu_buf[ii-1]->header.stamp.toSec();
                 dt2 = imu_buf[ii]->header.stamp.toSec() - each_odom_buf[i]->header.stamp.toSec();
                 w1 = dt2 / (dt1 + dt2);
@@ -1991,7 +2001,7 @@ public:
                 Ptmp += dt1 * Vtmp + 0.5 * dt1 * dt1 * un_acc;
                 Vtmp += dt1 * un_acc;
 
-                ii--;
+                ii--;// 重置ii为小于当前帧的最后一个imu，即下一积分周期（普通帧间）之前的最后一个imu
 
                 Eigen::Quaterniond qqq(Rtmp);
 
@@ -2011,9 +2021,11 @@ public:
                 latestPoseInfo.qz = qqq.z();
                 latestPoseInfo.time = each_odom_buf[i]->header.stamp.toSec();
                 pose_info_each_frame->push_back(latestPoseInfo);
-            }
+            }// 以上，根据imu积分得到了每一个普通帧的位姿
             pose_each_frame->push_back(pose_cloud_frame->points[pose_cloud_frame->points.size() - slide_window_width]);
             pose_info_each_frame->push_back(pose_info_cloud_frame->points[pose_cloud_frame->points.size() - slide_window_width]);
+            // 以上，再增加上滑窗内最旧的关键帧，而且其位姿是优化得到的，将来作为参数使用的，不参与优化
+            // 以下，通过积分的方式再计算一次当前帧的位姿
             int j = keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width];
 
             double dt1 = each_odom_buf[j-1]->header.stamp.toSec() - imu_buf[ii]->header.stamp.toSec();
@@ -2077,7 +2089,7 @@ public:
 
                 ii++;
             }
-
+            // 插值当前帧的imu
             dt1 = each_odom_buf[j]->header.stamp.toSec() - imu_buf[ii-1]->header.stamp.toSec();
             dt2 = imu_buf[ii]->header.stamp.toSec() - each_odom_buf[j]->header.stamp.toSec();
             w1 = dt2 / (dt1 + dt2);
@@ -2108,13 +2120,15 @@ public:
             Eigen::Vector3d un_acc = 0.5 * (un_acc_0 + un_acc_1);
             Ptmp += dt1 * Vtmp + 0.5 * dt1 * dt1 * un_acc;
             Vtmp += dt1 * un_acc;
+            // 以上完成了所有积分
 
-            vector<double*> paraBetweenEachFrame;
+            vector<double*> paraBetweenEachFrame;// imu积分得到的连续帧间位姿，作为约束存在
+            // 两个关键帧之间的普通帧数n+1。以下将计算普通/当前帧与前一帧之间的delta作为约束，用来优化n个普通帧位姿
             int numPara = keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width] - keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width - 1];
             double dQuat[numPara][4];
             double dTrans[numPara][3];
             for(int i = keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width - 1] + 1;
-                i < keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width]; i++) {
+                i < keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width]; i++) { // 两个关键帧之间的普通帧
                 Eigen::Vector3d tmpTrans = Eigen::Vector3d(pose_each_frame->points[i].x,
                                                            pose_each_frame->points[i].y,
                                                            pose_each_frame->points[i].z) -
@@ -2125,7 +2139,7 @@ public:
                         pose_info_each_frame->points[i-1].qx,
                         pose_info_each_frame->points[i-1].qy,
                         pose_info_each_frame->points[i-1].qz).inverse() * tmpTrans;
-                dTrans[i-keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width - 1]-1][0] = tmpTrans.x();
+                dTrans[i-keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width - 1]-1][0] = tmpTrans.x();// 从数组的0索引处开始存
                 dTrans[i-keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width - 1]-1][1] = tmpTrans.y();
                 dTrans[i-keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width - 1]-1][2] = tmpTrans.z();
                 paraBetweenEachFrame.push_back(dTrans[i-keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width - 1]-1]);
@@ -2146,7 +2160,8 @@ public:
             }
 
             int jj = keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width];
-
+            // 注意，pose_each_frame中后关键帧的位姿是优化给定的，不参与优化
+            // 其前向约束应该由积分给定
             Eigen::Vector3d tmpTrans = Ptmp - Eigen::Vector3d(pose_each_frame->points[jj-1].x,
                     pose_each_frame->points[jj-1].y,
                     pose_each_frame->points[jj-1].z);
