@@ -125,8 +125,8 @@ private:
     vector<int> vec_surf_res_cnt;
 
     // Form of the transformation
-    vector<double> abs_pose;
-    vector<double> last_pose;
+    vector<double> abs_pose;// 最新帧的位姿
+    vector<double> last_pose;// 最新margin帧的位姿
 
     std::mutex mutual_exclusion;
 
@@ -148,7 +148,7 @@ private:
     bool loop_to_close;
     int closest_his_idx;
     int latest_frame_idx_loop;
-    bool loop_closed;
+    bool loop_closed;// true标志完成了回环检测，匹配和位姿优化，等待保存优化后的位姿
 
     int local_map_width;
 
@@ -1685,7 +1685,7 @@ public:
     }
 
     // 1.窗口内关键帧优化并margin
-    // 2.被margin出去的关键帧与更前关键帧之间的普通帧，位姿优化
+    // 2.被margin出去的关键帧与更前关键帧之间的普通帧，位姿优化。IMU预积分作为观测和约束。
     // 3.被margin出去的关键帧与前面的普通帧被增加到全局位姿图中，全局优化
     // 也就是说在,当某一帧成为了slide_window_width中最旧的一帧并被margin掉后，其前序普通帧才会通过local graph优化，继而连同该margin关键帧被添加到global graph中做优化
     void saveKeyFramesAndFactors()
@@ -1826,7 +1826,8 @@ public:
             return;
 
         //add poses to global graph
-        if (pose_cloud_frame->points.size() == slide_window_width)// 第一次滑窗结束，满足该条件
+        // 第一次滑窗结束，满足该条件。添加第一个被滑窗出去的关键帧和先验位姿约束
+        if (pose_cloud_frame->points.size() == slide_window_width)
         {
             gtsam::Rot3 rotation = gtsam::Rot3::Quaternion(pose_info_each_frame->points[0].qw,
                     pose_info_each_frame->points[0].qx,
@@ -1848,11 +1849,11 @@ public:
             select_pose.y = last_pose[5];
             select_pose.z = last_pose[6];
         }
-
+        // margin掉的关键帧，及之前的普通帧，两两之间存在双边约束。这里的双边约束，就是利用local graph优化位姿计算得到的
         else if(pose_cloud_frame->points.size() > slide_window_width)
         {
             for(int i = keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width - 1] + 1;
-                i <= keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width]; i++) {// margin掉的关键帧，及之前的普通帧，两两之间存在双边约束
+                i <= keyframe_id_in_frame[pose_cloud_frame->points.size() - slide_window_width]; i++) {
                 gtsam::Rot3 rotationLast = gtsam::Rot3::Quaternion(pose_info_each_frame->points[i-1].qw,
                         pose_info_each_frame->points[i-1].qx,
                         pose_info_each_frame->points[i-1].qy,
@@ -2206,7 +2207,7 @@ public:
 
             vector<Eigen::Quaterniond> quaternionRel;
             vector<Eigen::Vector3d> transitionRel;
-
+            // 计算margin帧之后所有帧间的相对位姿
             for(int i = abs_poses.size() - slide_window_width; i < abs_poses.size() - 1; i++) {
                 Eigen::Quaterniond quaternionFrom(abs_poses[i][0],
                         abs_poses[i][1],
@@ -2227,7 +2228,7 @@ public:
                 quaternionRel.push_back(quaternionFrom.inverse() * quaternionTo);
                 transitionRel.push_back(quaternionFrom.inverse() * (transitionTo - transitionFrom));
             }
-
+            // 回环并且经过位姿优化后，所有帧的最优位姿拷贝
             for (int i = 0; i < numPoses; ++i)
             {
                 pose_each_frame->points[i].x = glocal_estimated.at<gtsam::Pose3>(i).translation().x();
@@ -2242,7 +2243,7 @@ public:
                 pose_info_each_frame->points[i].qy = glocal_estimated.at<gtsam::Pose3>(i).rotation().toQuaternion().y();
                 pose_info_each_frame->points[i].qz = glocal_estimated.at<gtsam::Pose3>(i).rotation().toQuaternion().z();
             }
-
+            // 关键帧的位姿也重新拷贝。
             for(int i = 0; i <= pose_cloud_frame->points.size() - slide_window_width; i++) {
                 pose_cloud_frame->points[i].x = pose_each_frame->points[keyframe_id_in_frame[i]].x;
                 pose_cloud_frame->points[i].y = pose_each_frame->points[keyframe_id_in_frame[i]].y;
@@ -2256,14 +2257,14 @@ public:
                 pose_info_cloud_frame->points[i].qy = pose_info_each_frame->points[keyframe_id_in_frame[i]].qy;
                 pose_info_cloud_frame->points[i].qz = pose_info_each_frame->points[keyframe_id_in_frame[i]].qz;
 
-                abs_poses[i+1][0] = pose_info_cloud_frame->points[i].qw;
+                abs_poses[i+1][0] = pose_info_cloud_frame->points[i].qw;// 索引差了1
                 abs_poses[i+1][1] = pose_info_cloud_frame->points[i].qx;
                 abs_poses[i+1][2] = pose_info_cloud_frame->points[i].qy;
                 abs_poses[i+1][3] = pose_info_cloud_frame->points[i].qz;
                 abs_poses[i+1][4] = pose_info_cloud_frame->points[i].x;
                 abs_poses[i+1][5] = pose_info_cloud_frame->points[i].y;
                 abs_poses[i+1][6] = pose_info_cloud_frame->points[i].z;
-
+                // Rs，Ps中的位姿不仅来源于IMU积分，也会随优化进行更新，后面的积分会在优化的基础上进行累积
                 Rs[i+1] = Eigen::Quaterniond(abs_poses[i+1][0],
                         abs_poses[i+1][1],
                         abs_poses[i+1][2],
@@ -2273,7 +2274,10 @@ public:
                 Ps[i+1][1] = abs_poses[i+1][5];
                 Ps[i+1][2] = abs_poses[i+1][6];
             }
+            // 以上，由于只有margin帧及更早的帧参与了优化，所以abs中只从优化获得了这些帧更优的位姿
 
+            // 以下，基于优化后的位姿，以及上面的相对位姿，预测更优的margin帧之后的位姿
+            // 对abs_poses,Rs, Ps, pose_cloud_frame, pose_info_cloud_frame进行更新
             for(int i = abs_poses.size() - slide_window_width; i < abs_poses.size() - 1; i++) {
                 Eigen::Quaterniond integratedQuaternion(abs_poses[i][0],
                         abs_poses[i][1],
@@ -2326,13 +2330,14 @@ public:
             select_pose.y = last_pose[5];
             select_pose.z = last_pose[6];
 
-            loop_closed = false;
+            loop_closed = false;// 取消掉回环检测成功过的标记
             marg = false;
         }
     }
 
     void publishOdometry()
     {
+        // 发布被滑窗出去的关键帧的位姿
         if(pose_info_cloud_frame->points.size() >= slide_window_width) {
             odom_mapping.header.stamp = ros::Time().fromSec(time_new_odom);
             odom_mapping.pose.pose.orientation.w = pose_info_cloud_frame->points[pose_info_cloud_frame->points.size()-slide_window_width].qw;
@@ -2347,7 +2352,7 @@ public:
 
         sensor_msgs::PointCloud2 msgs;
 
-
+        // 以点云形式发布所有普通帧的位置，当然也是刚被滑窗出去的关键帧之前的帧
         if (pub_poses.getNumSubscribers() && pose_info_cloud_frame->points.size() >= slide_window_width)
         {
             pcl::toROSMsg(*pose_each_frame, msgs);
@@ -2413,7 +2418,7 @@ public:
         edge_local_map_ds->clear();
         surf_local_map->clear();
         surf_local_map_ds->clear();
-
+        // 数组中点云清空，但是空点云还是占据vector中位置
         if(surf_lasts_ds.size() > slide_window_width + 5) {
             surf_lasts_ds[surf_lasts_ds.size() - slide_window_width - 6]->clear();
         }
@@ -2421,7 +2426,7 @@ public:
         if(pre_integrations.size() > slide_window_width + 5) {
             pre_integrations[pre_integrations.size() - slide_window_width - 6] = nullptr;
         }
-
+        // 只把指针赋值为nullptr，不释放？？
         if(last_marginalization_parameter_blocks.size() > slide_window_width + 5) {
             last_marginalization_parameter_blocks[last_marginalization_parameter_blocks.size() - slide_window_width - 6] = nullptr;
         }
@@ -2455,6 +2460,7 @@ public:
         std::vector<float> pt_search_sq_distsLoop;
 
         kd_tree_his_key_poses->setInputCloud(pose_cloud_frame);
+        // select_pose为刚被margin出去的关键帧的位置
         kd_tree_his_key_poses->radiusSearch(select_pose, lc_search_radius, pt_search_idxLoop, pt_search_sq_distsLoop, 0);
 
         closest_his_idx = -1;
@@ -2466,7 +2472,7 @@ public:
                 closest_his_idx = idx;
                 break;
             }
-        }
+        }// 距离足够，时间足够远，第一个就停止
 
         vector<int> localMapId;
         if (closest_his_idx == -1) {
@@ -2574,12 +2580,12 @@ public:
     {
         if (pose_cloud_frame->points.empty())
             return;
-
-        if (!loop_to_close)
+        // 总结而言，detectLoopClosure()不成功则直接返回
+        if (!loop_to_close)// 如果还没有检测到回环。刚初始化后，以及上次回环后，loop_to_close都会被置为false
         {
             if (detectLoopClosure())
-                loop_to_close = true;
-            if (!loop_to_close)
+                loop_to_close = true;// 检测到回环，进行匹配
+            if (!loop_to_close)// 如果依然没有检测到回环，返回
                 return;
         }
 
@@ -2592,7 +2598,7 @@ public:
         icp.setEuclideanFitnessEpsilon(1e-6);
         icp.setRANSACIterations(5);
 
-        icp.setInputSource(latest_key_frames_ds);
+        icp.setInputSource(latest_key_frames_ds);// 都是在世界坐标系下的
         icp.setInputTarget(his_key_frames_ds);
         pcl::PointCloud<PointType>::Ptr alignedCloud(new pcl::PointCloud<PointType>());
         icp.align(*alignedCloud);
@@ -2607,6 +2613,7 @@ public:
 
         Eigen::Matrix4d correctedTranform;
         correctedTranform = icp.getFinalTransformation().cast<double>();
+        // 当前帧的偏移量
         Eigen::Quaterniond quaternionIncre(correctedTranform.block<3, 3>(0, 0));
         Eigen::Vector3d transitionIncre(correctedTranform.block<3, 1>(0, 3));
         Eigen::Quaterniond quaternionToCorrect(pose_info_cloud_frame->points[latest_frame_idx_loop].qw,
@@ -2648,12 +2655,12 @@ public:
         isam->update();
         glocal_pose_graph.resize(0);
 
-        loop_closed = true;
+        loop_closed = true;// 标志完成了回环检测，匹配和位姿优化，等待保存优化后的位姿
 
         glocal_estimated = isam->calculateEstimate();
-        correctPoses();
+        correctPoses();// 保存优化后的margin帧及更早帧的位姿到abs_poses,Rs,Ps,pose_cloud_frame等，并预测margin帧之后的位姿
 
-        if (last_marginalization_info) {
+        if (last_marginalization_info) {// TODO:如果存在边缘化信息，全部删除？？
             delete last_marginalization_info;
         }
         last_marginalization_info = nullptr;
@@ -2760,8 +2767,8 @@ public:
             Timer t_map("BackendFusion");
             buildLocalMapWithLandMark();// the latest several pcs 
             downSampleCloud();
-            saveKeyFramesAndFactors();
-            publishOdometry();
+            saveKeyFramesAndFactors();// 滑窗优化，local graph优化，global graph优化
+            publishOdometry();// 发布被滑窗出去的关键帧及之前普通帧的位姿
             clearCloud();
             // t_map.tic_toc();
 
