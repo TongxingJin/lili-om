@@ -798,6 +798,7 @@ public:
         return cloudOut;
     }
 
+    // imu里程计积分和关键帧间预积分
     void processIMU(double dt, const Eigen::Vector3d &linear_acceleration, const Eigen::Vector3d &angular_velocity)
     {
         //      if(pre_integrations.size() == 0)
@@ -811,7 +812,7 @@ public:
             Ps.push_back(Ps.back());
             Vs.push_back(Vs.back());
         }
-        // the following Rs,Ps,Vs are global poses
+        // Rs，Ps，Vs都是imu里程计的位姿
         Eigen::Vector3d un_acc_0 = Rs.back() * (acc_0 - Bas.back()) - g;
         Eigen::Vector3d un_gyr = 0.5 * (gyr_0 + angular_velocity) - Bgs.back();
         Rs.back() *= deltaQ(un_gyr * dt).toRotationMatrix();
@@ -820,13 +821,14 @@ public:
         Ps.back() += dt * Vs.back() + 0.5 * dt * dt * un_acc;
         Vs.back() += dt * un_acc;
 
-        pre_integrations.back()->push_back(dt, linear_acceleration, angular_velocity);// imu preintegration
+        // imu预积分
+        pre_integrations.back()->push_back(dt, linear_acceleration, angular_velocity);
 
         acc_0 = linear_acceleration;
         gyr_0 = angular_velocity;
     }
 
-
+    // 关键帧滑窗优化
     void optimizeSlidingWindowWithLandMark()
     {
         if(slide_window_width < 1) return;
@@ -850,7 +852,8 @@ public:
             //eigen to double
             for (int i = keyframe_idx[keyframe_idx.size()-slide_window_width]; i <= keyframe_idx.back(); i++){
                 
-                Eigen::Quaterniond tmpQ(Rs[i]);
+                Eigen::Quaterniond tmpQ(Rs[i]);// 里程计姿态
+                
                 tmpQuat[i-keyframe_idx[keyframe_idx.size()-slide_window_width]][0] = tmpQ.w();
                 tmpQuat[i-keyframe_idx[keyframe_idx.size()-slide_window_width]][1] = tmpQ.x();
                 tmpQuat[i-keyframe_idx[keyframe_idx.size()-slide_window_width]][2] = tmpQ.y();
@@ -1690,7 +1693,7 @@ public:
     // 也就是说在,当某一帧成为了slide_window_width中最旧的一帧并被margin掉后，其前序普通帧才会通过local graph优化，继而连同该margin关键帧被添加到global graph中做优化
     void saveKeyFramesAndFactors()
     {
-        abs_poses.push_back(abs_pose);// add new initial pose???
+        abs_poses.push_back(abs_pose);// 初始化新关键帧位姿
         keyframe_id_in_frame.push_back(each_odom_buf.size()-1);// the latest relative transform
 
         pcl::PointCloud<PointType>::Ptr cornerEachFrame(new pcl::PointCloud<PointType>());
@@ -1738,7 +1741,7 @@ public:
                                            imu_buf[i]->orientation.x,
                                            imu_buf[i]->orientation.y,
                                            imu_buf[i]->orientation.z);
-            processIMU(dt, Eigen::Vector3d(dx, dy, dz), Eigen::Vector3d(rx, ry, rz));
+            processIMU(dt, Eigen::Vector3d(dx, dy, dz), Eigen::Vector3d(rx, ry, rz));// imu里程计积分和关键帧间预积分
             i++;
             if(i >= imu_buf.size())
                 break;
@@ -1780,7 +1783,7 @@ public:
         // <- imu preintegration 
 
         vector<double> tmpSpeedBias;
-        tmpSpeedBias.push_back(Vs.back().x());// global pose of current key frame
+        tmpSpeedBias.push_back(Vs.back().x());// imu里程计位姿，将来被优化的变量
         tmpSpeedBias.push_back(Vs.back().y());
         tmpSpeedBias.push_back(Vs.back().z());
         tmpSpeedBias.push_back(Bas.back().x());
