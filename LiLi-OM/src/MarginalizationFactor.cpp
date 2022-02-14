@@ -231,7 +231,7 @@ MarginalizationFactor::MarginalizationFactor(MarginalizationInfo *_marginalizati
 };
 
 bool MarginalizationFactor::Evaluate(double const *const *parameters, double *residuals, double **jacobians) const {
-    int n = marginalization_info->n;
+    int n = marginalization_info->n;// 残差维数
     int m = marginalization_info->m;
     Eigen::VectorXd dx(n);
     for (int i = 0; i < static_cast<int>(marginalization_info->keep_block_size.size()); i++) {
@@ -254,7 +254,7 @@ bool MarginalizationFactor::Evaluate(double const *const *parameters, double *re
     }
 
     Eigen::Map<Eigen::VectorXd>(residuals, n) =
-            marginalization_info->linearized_residuals + marginalization_info->linearized_jacobians * dx;
+            marginalization_info->linearized_residuals + marginalization_info->linearized_jacobians * dx;// 参数增加dx后的残差？
 
     if (jacobians) {
 
@@ -268,7 +268,7 @@ bool MarginalizationFactor::Evaluate(double const *const *parameters, double *re
                 Eigen::VectorXd x0 = Eigen::Map<const Eigen::VectorXd>(marginalization_info->keep_block_data[i], size);
                 //
                 Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
-                        jacobian(jacobians[i], n, size);
+                        jacobian(jacobians[i], n, size);// n行size列
                 jacobian.setZero();
                 if(size != 4)
                     jacobian.rightCols(local_size) = marginalization_info->linearized_jacobians.middleCols(idx, local_size);

@@ -34,7 +34,7 @@ public:
 
         Eigen::Map<Eigen::Matrix<double, 15, 1>> residual(residuals);
         residual = pre_integration_->evaluate(Pi, Qi, Vi, Bai, Bgi,
-                                              Pj, Qj, Vj, Baj, Bgj);
+                                              Pj, Qj, Vj, Baj, Bgj);// 矩阵可以直接赋值给Map，进而修改数组的值，实现Eigen矩阵转数组
 
 
         Eigen::Matrix<double, 15, 15> sqrt_info = Eigen::LLT<Eigen::Matrix<double, 15, 15>>(pre_integration_->covariance_.inverse()).matrixL().transpose();

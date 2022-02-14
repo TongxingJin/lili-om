@@ -210,10 +210,10 @@ public:
         Matrix3d dv_dba = jacobian_.block<3, 3>(O_V, O_BA);
         Matrix3d dv_dbg = jacobian_.block<3, 3>(O_V, O_BG);
 
-        Vector3d dba = Bai - linearized_ba_;
+        Vector3d dba = Bai - linearized_ba_;// bias的增量
         Vector3d dbg = Bgi - linearized_bg_; // NOTE: optimized one minus the linearized one
 
-        Quaterniond corrected_delta_q = delta_q_ * deltaQ(dq_dbg * dbg);
+        Quaterniond corrected_delta_q = delta_q_ * deltaQ(dq_dbg * dbg);// 对预积分进行修正
         Vector3d corrected_delta_v = delta_v_ + dv_dba * dba + dv_dbg * dbg;
         Vector3d corrected_delta_p = delta_p_ + dp_dba * dba + dp_dbg * dbg;
 
