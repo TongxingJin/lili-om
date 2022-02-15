@@ -36,11 +36,19 @@ public:
         residual = pre_integration_->evaluate(Pi, Qi, Vi, Bai, Bgi,
                                               Pj, Qj, Vj, Baj, Bgj);// 矩阵可以直接赋值给Map，进而修改数组的值，实现Eigen矩阵转数组
 
-
+        // 信息阵的LLT分解的上三角
+        // rt * sigma.inverse() * r
+        // rt * information * r
+        // rt * l * lt * r
+        // rt * ut * u * r
+        // (ur)t * ur
+        // 因此中间加上信息阵，等价于在r上直接乘上一个u
         Eigen::Matrix<double, 15, 15> sqrt_info = Eigen::LLT<Eigen::Matrix<double, 15, 15>>(pre_integration_->covariance_.inverse()).matrixL().transpose();
 
         residual = sqrt_info * residual;
-
+        // 如果需要返回雅可比
+        // 即15维的残差对16*2维的参数的雅可比
+        // 这里参数的姿态是用四元数表示的，而残差是三维角轴
         if(jacobians) {
             double sum_dt = pre_integration_->sum_dt_;
             Eigen::Matrix3d dp_dba = pre_integration_->jacobian_.template block<3, 3>(O_P, O_BA);
@@ -51,19 +59,20 @@ public:
 
             if (pre_integration_->jacobian_.maxCoeff() > 1e8 || pre_integration_->jacobian_.minCoeff() < -1e8)
                 ROS_WARN("numerical unstable in preintegration");
-
+            // 所有residual对Pi的雅可比
             if (jacobians[0]) {
                 Eigen::Map<Eigen::Matrix<double, 15, 3, Eigen::RowMajor>> jacobian_pose_i(jacobians[0]);
                 jacobian_pose_i.setZero();
 
-                jacobian_pose_i.block<3, 3>(O_P, O_P) = -Qi.inverse().toRotationMatrix();
+                jacobian_pose_i.block<3, 3>(O_P, O_P) = -Qi.inverse().toRotationMatrix();// 第一个O_P代表，Pi只与残差的第一项有关
 
                 jacobian_pose_i = sqrt_info * jacobian_pose_i;
 
                 if (jacobian_pose_i.maxCoeff() > 1e8 || jacobian_pose_i.minCoeff() < -1e8)
                     ROS_WARN("numerical unstable in preintegration");
             }
-
+            // 所有residual对Qi的雅可比
+            // 注意这里参数Q是四元数，而残差的姿态是三维角轴形式
             if (jacobians[1]) {
                 Eigen::Map<Eigen::Matrix<double, 15, 4, Eigen::RowMajor>> jacobian_pose_qi(jacobians[1]);
                 jacobian_pose_qi.setZero();
@@ -83,12 +92,12 @@ public:
 
                 jacobian_pose_qi = sqrt_info * jacobian_pose_qi;
             }
-
+            // 所有residual对i时刻的速度和bias的雅可比
             if (jacobians[2]) {
                 Eigen::Map<Eigen::Matrix<double, 15, 9, Eigen::RowMajor>> jacobian_speedbias_i(jacobians[2]);
                 jacobian_speedbias_i.setZero();
                 jacobian_speedbias_i.block<3, 3>(O_P, O_V - O_V) = -Qi.inverse().toRotationMatrix() * sum_dt;
-                jacobian_speedbias_i.block<3, 3>(O_P, O_BA - O_V) = -dp_dba;
+                jacobian_speedbias_i.block<3, 3>(O_P, O_BA - O_V) = -dp_dba;// 这两个雅可比是从预积分获得的
                 jacobian_speedbias_i.block<3, 3>(O_P, O_BG - O_V) = -dp_dbg;
 
                 Eigen::Quaterniond corrected_delta_q = pre_integration_->delta_q_ * deltaQ(dq_dbg * (Bgi - pre_integration_->linearized_bg_));

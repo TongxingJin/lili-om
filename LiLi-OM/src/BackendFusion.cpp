@@ -907,9 +907,10 @@ public:
 
             }
             // 滑窗内相邻关键帧之间的IMU预积分约束
+            // 直接给定cost function
             for (int idx = keyframe_idx[keyframe_idx.size()-slide_window_width]; idx < keyframe_idx.back(); ++idx) {
                 //add imu factor
-                ImuFactor *imuFactor = new ImuFactor(pre_integrations[idx+1]);
+                ImuFactor *imuFactor = new ImuFactor(pre_integrations[idx+1]);// 直接给定cost function
                 problem.AddResidualBlock(imuFactor, NULL, tmpTrans[idx-keyframe_idx[keyframe_idx.size()-slide_window_width]],
                         tmpQuat[idx-keyframe_idx[keyframe_idx.size()-slide_window_width]],
                         tmpSpeedBias[idx-keyframe_idx[keyframe_idx.size()-slide_window_width]],
@@ -920,6 +921,7 @@ public:
 
             }
             // 滑窗内关键帧与map之间存在的约束
+            // 给定的cost functor，用来初始化AutoDiffCostFunction
             for (int idx = keyframe_idx[keyframe_idx.size()-slide_window_width]; idx <= keyframe_idx.back(); idx++)
             {
                 Eigen::Quaterniond Q2 = Eigen::Quaterniond(tmpQuat[idx-keyframe_idx[keyframe_idx.size()-slide_window_width]][0],
@@ -1070,7 +1072,7 @@ public:
             marg = true;
         }
 
-        // 滑窗内第1和2帧之间的imu预积分约束，需要被margin掉
+        // 滑窗内第1和2帧之间的imu预积分约束，需要被marginal掉
         //imu
         ImuFactor *imuFactor = new ImuFactor(pre_integrations[keyframe_idx[keyframe_idx.size()-slide_window_width]+1]);
 
@@ -1083,7 +1085,7 @@ public:
                                                                            tmpQuat[1],
                                                                            tmpSpeedBias[1]
                                                                        },
-                                                                       vector<int>{0, 1, 2});
+                                                                       vector<int>{0, 1, 2});// 012代表，前三个param_block是需要被marginal掉的
 
         marginalization_info->AddResidualBlockInfo(residual_block_info);
 
@@ -1099,7 +1101,7 @@ public:
                 tmp.push_back(tmpTrans[idx-keyframe_idx[keyframe_idx.size()-slide_window_width]]);
                 tmp.push_back(tmpQuat[idx-keyframe_idx[keyframe_idx.size()-slide_window_width]]);
 
-                for (int i = 0; i < vec_surf_res_cnt[idVec]; ++i)
+                for (int i = 0; i < vec_surf_res_cnt[idVec]; ++i)// 该关键帧面点约束的数量
                 {
                     Eigen::Vector3d currentPt(vec_surf_cur_pts[idVec]->points[i].x,
                                               vec_surf_cur_pts[idVec]->points[i].y,
@@ -1112,7 +1114,9 @@ public:
                     ceres::CostFunction *costFunction = LidarPlaneNormFactor::Create(currentPt, norm, q_lb, t_lb, normInverse, vec_surf_scores[idVec][i]);
 
                     vector<int> drop_set;
-                    if(idx == keyframe_idx[keyframe_idx.size()-slide_window_width]) {// 如果是第一帧，即需要被margin掉的那帧
+                    // 如果是第一帧，即需要被margin掉的那帧
+                    // 01代表
+                    if(idx == keyframe_idx[keyframe_idx.size()-slide_window_width]) {
                         drop_set.push_back(0);
                         drop_set.push_back(1);
                     }

@@ -84,6 +84,8 @@ MarginalizationInfo::~MarginalizationInfo() {
     }
 }
 
+// parameter_block_size这个map中记录了与该residual相关的所有参数的size
+// 如果某个参数是需要被marginal掉的，那么其size置为0
 void MarginalizationInfo::AddResidualBlockInfo(ResidualBlockInfo *residual_block_info) {
     factors.emplace_back(residual_block_info);
 
@@ -91,15 +93,15 @@ void MarginalizationInfo::AddResidualBlockInfo(ResidualBlockInfo *residual_block
     std::vector<int> parameter_block_sizes = residual_block_info->cost_function->parameter_block_sizes();
 
     for (int i = 0; i < static_cast<int>(residual_block_info->parameter_blocks.size()); i++) {
-        double *addr = parameter_blocks[i];
+        double *addr = parameter_blocks[i];// 与该因子相关的参数的首地址，作为该指针的标志
         int size = parameter_block_sizes[i];
-        parameter_block_size[reinterpret_cast<long>(addr)] = size;// 成员变量
+        parameter_block_size[reinterpret_cast<long>(addr)] = size;// map,其key为参数的首地址
     }
 
     if(residual_block_info->drop_set.size() == 0) return;// 如果drop_set为空，在这里就返回了
 
     for (int i = 0; i < static_cast<int>(residual_block_info->drop_set.size()); i++) {
-        double *addr = parameter_blocks[residual_block_info->drop_set[i]];// 该parameter block的首地址
+        double *addr = parameter_blocks[residual_block_info->drop_set[i]];// 需要被margin掉的parameter block的首地址
         parameter_block_idx[reinterpret_cast<long>(addr)] = 0;
     }
 }
