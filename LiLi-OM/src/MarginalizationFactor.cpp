@@ -2,13 +2,15 @@
 
 void *ThreadsConstructA(void *threadsstruct) {
     ThreadsStruct *p = ((ThreadsStruct *) threadsstruct);
-    for (auto it : p->sub_factors) {
-        for (int i = 0; i < static_cast<int>(it->parameter_blocks.size()); i++) {
-            int idx_i = p->parameter_block_idx[reinterpret_cast<long>(it->parameter_blocks[i])];
+    // 计算H和b阵
+    // H和b的行列顺序只与参数有关，与残差没有关系，残差带来的是H和b的累积
+    for (auto it : p->sub_factors) {// 单个线程处理了多个factor
+        for (int i = 0; i < static_cast<int>(it->parameter_blocks.size()); i++) {// 每个因子包含多个参数块
+            int idx_i = p->parameter_block_idx[reinterpret_cast<long>(it->parameter_blocks[i])];// 以该参数所在地址为key，查询该参数序列和大小
             int size_i = p->parameter_block_size[reinterpret_cast<long>(it->parameter_blocks[i])];
             if (size_i == 4)
                 size_i = 3;
-            Eigen::MatrixXd jacobian_i = it->jacobians[i].rightCols(size_i);
+            Eigen::MatrixXd jacobian_i = it->jacobians[i].rightCols(size_i);// it->jacobians[i]为该因子残差对该参数块的雅可比（这里使用rightCols主要针对四元数只取虚部）
             for (int j = i; j < static_cast<int>(it->parameter_blocks.size()); j++) {
                 int idx_j = p->parameter_block_idx[reinterpret_cast<long>(it->parameter_blocks[j])];
                 int size_j = p->parameter_block_size[reinterpret_cast<long>(it->parameter_blocks[j])];
@@ -21,7 +23,7 @@ void *ThreadsConstructA(void *threadsstruct) {
                     p->A.block(idx_i, idx_j, size_i, size_j) += jacobian_i.transpose() * jacobian_j;
                     p->A.block(idx_j, idx_i, size_j, size_i) = p->A.block(idx_i, idx_j, size_i, size_j).transpose();
                 }
-            }
+            }// 该参数块后向对H的影响
             p->b.segment(idx_i, size_i) += jacobian_i.transpose() * it->residuals;
         }
     }
@@ -39,15 +41,15 @@ void ResidualBlockInfo::Evaluate() {
         jacobians[i].resize(cost_function->num_residuals(), block_sizes[i]);
         raw_jacobians[i] = jacobians[i].data();
     }
-    cost_function->Evaluate(parameter_blocks.data(), residuals.data(), raw_jacobians);
+    cost_function->Evaluate(parameter_blocks.data(), residuals.data(), raw_jacobians);// 基于参数，重新计算residuals和jacobians
 
     if (loss_function) {
         double residual_scaling_, alpha_sq_norm_;
 
         double sq_norm, rho[3];
 
-        sq_norm = residuals.squaredNorm();
-        loss_function->Evaluate(sq_norm, rho);
+        sq_norm = residuals.squaredNorm();// 残差的平方
+        loss_function->Evaluate(sq_norm, rho);// 基于残差的平方，计算loss
 
         double sqrt_rho1_ = sqrt(rho[1]);
 
@@ -85,7 +87,7 @@ MarginalizationInfo::~MarginalizationInfo() {
 }
 
 // parameter_block_size这个map中记录了与该residual相关的所有参数的size
-// 如果某个参数是需要被marginal掉的，那么其size置为0
+// 如果某个参数是需要被marginal掉的，那么其id置为0
 void MarginalizationInfo::AddResidualBlockInfo(ResidualBlockInfo *residual_block_info) {
     factors.emplace_back(residual_block_info);
 
@@ -117,7 +119,7 @@ void MarginalizationInfo::PreMarginalize() {
             if (parameter_block_data.find(addr) == parameter_block_data.end()) {
                 double *data = new double[size];
                 memcpy(data, it->parameter_blocks[i], sizeof(double) * size);
-                parameter_block_data[addr] = data;
+                parameter_block_data[addr] = data;// 把参数从factor拷贝到parameter_block_data。addr是factor中该参数的地址，data是被拷贝到的地址
             }
         }
     }
@@ -129,7 +131,7 @@ int MarginalizationInfo::LocalSize(int size) const {
 
 void MarginalizationInfo::Marginalize() {
     int pos = 0;
-    for (auto &it : parameter_block_idx) {
+    for (auto &it : parameter_block_idx) {// 所有需要被marginal掉的参数块
         it.second = pos;
         pos += LocalSize(parameter_block_size[it.first]);
     }
@@ -137,14 +139,14 @@ void MarginalizationInfo::Marginalize() {
     m = pos;
 
     for (const auto &it : parameter_block_size) {
-        if (parameter_block_idx.find(it.first) == parameter_block_idx.end()) {
+        if (parameter_block_idx.find(it.first) == parameter_block_idx.end()) {// 不需要被marginal的参数块
             parameter_block_idx[it.first] = pos;
             pos += LocalSize(it.second);
         }
     }
 
     n = pos - m;
-
+    // m是需要marginal的参数的维度，n是不需要marginal的参数的维度（四元数以3计，其实是delta_x的维度）
     Eigen::MatrixXd A(pos, pos);
     Eigen::VectorXd b(pos);
     A.setZero();
@@ -178,7 +180,9 @@ void MarginalizationInfo::Marginalize() {
     Eigen::MatrixXd Amm = 0.5 * (A.block(0, 0, m, m) + A.block(0, 0, m, m).transpose());
     Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> saes(Amm);
 
-
+    // .select，如果某个元素为1则选择themMatrix中对应位置的元素，否则选择elseMatrix中的
+    // 这里实际上是取了特征值的逆，且不小于0
+    // 这里通过特征值分解求解了Amm的逆阵
     Eigen::MatrixXd Amm_inv = saes.eigenvectors()
             * Eigen::VectorXd((saes.eigenvalues().array() > eps).select(saes.eigenvalues().array().inverse(), 0)).asDiagonal()
             * saes.eigenvectors().transpose();
@@ -189,18 +193,18 @@ void MarginalizationInfo::Marginalize() {
     Eigen::MatrixXd Arr = A.block(m, m, n, n);
     Eigen::VectorXd brr = b.segment(m, n);
     A = Arr - Arm * Amm_inv * Amr;
-    b = brr - Arm * Amm_inv * bmm;
+    b = brr - Arm * Amm_inv * bmm;// 边缘化H和b阵
 
     Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> saes2(A);
     Eigen::VectorXd S = Eigen::VectorXd((saes2.eigenvalues().array() > eps).select(saes2.eigenvalues().array(), 0));
     Eigen::VectorXd
             S_inv = Eigen::VectorXd((saes2.eigenvalues().array() > eps).select(saes2.eigenvalues().array().inverse(), 0));
 
-    Eigen::VectorXd S_sqrt = S.cwiseSqrt();
+    Eigen::VectorXd S_sqrt = S.cwiseSqrt();// 对每个元素开根号
     Eigen::VectorXd S_inv_sqrt = S_inv.cwiseSqrt();
 
-    linearized_jacobians = S_sqrt.asDiagonal() * saes2.eigenvectors().transpose();
-    linearized_residuals = S_inv_sqrt.asDiagonal() * saes2.eigenvectors().transpose() * b;
+    linearized_jacobians = S_sqrt.asDiagonal() * saes2.eigenvectors().transpose();// linearized_jacobians.transpose() * linearized_jacobians = H，相当于求解出了一个等价的J
+    linearized_residuals = S_inv_sqrt.asDiagonal() * saes2.eigenvectors().transpose() * b;// TODO:
 }
 
 std::vector<double *> MarginalizationInfo::GetParameterBlocks(std::unordered_map<long, double *> &addr_shift) {

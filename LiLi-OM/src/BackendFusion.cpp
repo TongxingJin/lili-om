@@ -1089,7 +1089,8 @@ public:
 
         marginalization_info->AddResidualBlockInfo(residual_block_info);
 
-        // 主要针对需要被margin掉的帧
+        // 把窗口内所有关键帧的costFunction添加到marginalization_info
+        // 但是只有第一帧的drop_set不为空
         //lidar
         for (int idx = keyframe_idx[keyframe_idx.size()-slide_window_width]; idx <= keyframe_idx.back(); idx++)
         {
@@ -1174,7 +1175,7 @@ public:
         }
         // TODO:真正执行边缘化
         marginalization_info->PreMarginalize();
-        marginalization_info->Marginalize();// <=边缘化结束
+        marginalization_info->Marginalize();// 边缘化，重新计算H和b阵，并计算linearized_jacobians和linearized_residuals
         
         std::unordered_map<long, double *> addr_shift;
         for (int i = 1; i < windowSize; ++i) {
